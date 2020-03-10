@@ -67,9 +67,88 @@ impl CapsDropBuilder {
     }
 }
 
+pub enum IpConfig {
+    NotSpecified,
+    Address(InlinableString),
+    AddressRange(InlinableString)
+}
+
+pub struct InterfaceConfig {
+    default_gw: Option<InlinableString>,
+    mac: Option<InlinableString>,
+    ip_config: IpConfig,
+    ip6: Option<InlinableString>,
+    mtu: Option<usize>,
+    netmask: Option<InlinableString>,
+    veth_name: Option<InlinableString>
+}
+
+pub enum Net {
+    NotSpecfied,
+    None,
+    Interfaces((InlinableString, Vec<InterfaceConfig>)),
+}
+
+pub enum NetFilter {
+    Disable,
+    Default,
+    WithSetting {
+        path: PathBuf,
+        args: Option<Vec<InlinableString>>
+    }
+}
+
+pub enum Join {
+    Pid(usize),
+    Name(InlinableString)
+}
+
+pub enum Overlay {
+    NoSpecified,
+    Tmp,
+    Named(InlinableString),
+}
+
+pub enum Private {
+    NoSpecified,
+    Default,
+    Directory(PathBuf),
+}
+
+pub enum PrivateList {
+    NoSpecified,
+    Empty,
+    Files(Vec<PathBuf>),
+}
+pub enum Seccomp {
+    NotSpecified,
+    Enable,
+    BlockSecondary,
+    List(Vec<InlinableString>),
+    Drop(Vec<InlinableString>),
+    Keep(Vec<InlinableString>),
+}
+
+pub enum Shell {
+    NotSpecified,
+    SetToNone,
+    SetTo(PathBuf)
+}
+
+pub enum X11 {
+    NotSpecified,
+    Auto,
+    Disable,
+    Xephyr(Option<(usize, usize)>),
+    Xorg,
+    Xpra,
+    Xvfb,
+}
+
+pub struct Timeout(usize, usize, usize);
+
 struct Profile {
     verbose: bool,
-    private: bool,
     allow_debuggers: bool,
     allusers: bool,
     apparmor: bool,
@@ -78,12 +157,87 @@ struct Profile {
     caps_drop: CapsDrop,
     bind: Vec<(PathBuf, PathBuf)>,
     blacklists: Vec<PathBuf>,
+    cgroup: Option<InlinableString>,
+    cpu: Vec<usize>,
+    disable_mnt: bool,
+    deterministic_exit_code: bool,
+    dns: Option<InlinableString>,
+    hostname: Option<InlinableString>,
+    host_file: Option<PathBuf>,
+    ignore: Vec<InlinableString>,
+    interface: Vec<InlinableString>,
+    default_net: InterfaceConfig,
+    networks: Net,
+    ipc_namespace: bool,
+    keep_dev_shm: bool,
+    keep_var_tmp: bool,
+    machine_id: bool,
+    memory_deny_write_execute: bool,
+    name: Option<InlinableString>,
+    netfilter: NetFilter,
+    netfilter6: NetFilter,
+    join: Option<Join>,
+    join_network: Option<Join>,
+    join_fs: Option<Join>,
+    join_or_start: Option<InlinableString>,
+    netns: Option<InlinableString>,
+    nice: Option<usize>,
+    no3d: bool,
+    noautopulse: bool,
+    noblacklist: Vec<PathBuf>,
+    nodbus: bool,
+    nodvd: bool,
+    noexec: Vec<PathBuf>,
+    nogroups: bool,
+    nonewprivs: bool,
+    noprofile: bool,
+    noroot: bool,
+    nosound: bool,
+    notv: bool,
+    nou2f: bool,
+    novideo: bool,
+    nowhitelist: Vec<PathBuf>,
+    output: Option<PathBuf>,
+    output_stderr: Option<PathBuf>,
+    overlay: Overlay,
+    private: Private,
+    private_bin: PrivateList,
+    private_cache: bool,
+    private_cwd: Private,
+    private_dev: bool,
+    private_etc: PrivateList,
+    private_home: PrivateList,
+    private_lib: PrivateList,
+    private_opt: PrivateList,
+    private_srv: PrivateList,
+    private_tmp: bool,
+    profile: Option<PathBuf>,
+    protocal: Vec<InlinableString>,
+    read_only: Vec<PathBuf>,
+    read_write: Vec<PathBuf>,
+    rlimit: Option<usize>,
+    rlimit_cpu: Option<usize>,
+    rlimit_fsize: Option<usize>,
+    rlimit_nofile: Option<usize>,
+    rlimit_nproc: Option<usize>,
+    rlimit_sigpending: Option<usize>,
+    remove_env: Vec<InlinableString>,
+    seccomp: Seccomp,
+    shell: Shell,
+    timeout: Option<Timeout>,
+    tmpfs: Vec<PathBuf>,
+    tunnel: Option<InlinableString>,
+    whitelist: Vec<PathBuf>,
+    writable_etc: bool,
+    writable_run_user: bool,
+    writable_var: bool,
+    writable_var_log: bool,
+    x11: X11
 }
 
 
 impl FireJailCommand {
     bool_option!(verbose);
-    bool_option!(private);
     bool_option!(allow_debuggers);
     bool_option!(allusers);
     bool_option!(apparmor);
@@ -96,7 +250,6 @@ impl FireJailCommand {
             arg_vec: Vec::new(),
             profile: Profile {
                 verbose: false,
-                private: false,
                 allow_debuggers: false,
                 allusers: false,
                 apparmor: false,
@@ -105,6 +258,90 @@ impl FireJailCommand {
                 caps_drop: CapsDrop::NotSpecified,
                 bind: Vec::new(),
                 blacklists: Vec::new(),
+                cgroup: None,
+                cpu: vec![],
+                disable_mnt: false,
+                deterministic_exit_code: false,
+                dns: None,
+                hostname: None,
+                host_file: None,
+                ignore: vec![],
+                interface: vec![],
+                default_net: InterfaceConfig {
+                    default_gw: None,
+                    mac: None,
+                    ip_config: IpConfig::NotSpecified,
+                    ip6: None,
+                    mtu: None,
+                    netmask: None,
+                    veth_name: None
+                },
+                networks: Net::NotSpecfied,
+                ipc_namespace: false,
+                keep_dev_shm: false,
+                keep_var_tmp: false,
+                machine_id: false,
+                memory_deny_write_execute: false,
+                name: None,
+                netfilter: NetFilter::Disable,
+                netfilter6: NetFilter::Disable,
+                join: None,
+                join_network: None,
+                join_fs: None,
+                join_or_start: None,
+                netns: None,
+                nice: None,
+                no3d: false,
+                noautopulse: false,
+                noblacklist: vec![],
+                nodbus: false,
+                nodvd: false,
+                noexec: vec![],
+                nogroups: false,
+                nonewprivs: false,
+                noprofile: false,
+                noroot: false,
+                nosound: false,
+                notv: false,
+                nou2f: false,
+                novideo: false,
+                nowhitelist: vec![],
+                output: None,
+                output_stderr: None,
+                overlay: Overlay::NoSpecified,
+                private: Private::NoSpecified,
+                private_bin: PrivateList::NoSpecified,
+                private_cache: false,
+                private_cwd: Private::NoSpecified,
+                private_dev: false,
+                private_etc: PrivateList::NoSpecified,
+                private_home: PrivateList::NoSpecified,
+                private_lib: PrivateList::NoSpecified,
+                private_opt: PrivateList::NoSpecified,
+                private_srv: PrivateList::NoSpecified,
+                private_tmp: false,
+                profile: None,
+                protocal: vec![],
+                read_only: vec![],
+                read_write: vec![],
+                rlimit: None,
+                rlimit_cpu: None,
+                rlimit_fsize: None,
+                rlimit_nofile: None,
+                rlimit_nproc: None,
+                rlimit_sigpending: None,
+                remove_env: vec![],
+                seccomp: Seccomp::NotSpecified,
+                shell: Shell::NotSpecified,
+                timeout: None,
+                tmpfs: vec![],
+                tunnel: None,
+                whitelist: vec![],
+                writable_etc: false,
+                writable_run_user: false,
+                writable_var: false,
+                writable_var_log: false,
+                x11: X11::NotSpecified
             },
         }
     }
@@ -204,9 +441,6 @@ impl FireJailCommand {
     pub fn spawn(&mut self) -> Result<Child> {
         if !self.profile.verbose {
             self.inner.arg("--quiet");
-        }
-        if self.profile.private {
-            self.inner.arg("--private");
         }
         if self.profile.caps {
             self.inner.arg("--caps");
