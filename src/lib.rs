@@ -3,13 +3,31 @@ use std::io::Read;
 use std::io::Result;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-
+use num_traits::AsPrimitive;
 use inlinable_string::InlinableString;
 
 macro_rules! bool_option {
     ($name: ident) => {
         pub fn $name(&mut self) -> &mut Self {
             self.profile.$name = true;
+            self
+        }
+    };
+}
+
+macro_rules! inlinablestring_option_replace {
+    ($name: ident) => {
+        pub fn $name<S : AsRef<str>>(&mut self, s : S) -> &mut Self {
+            self.profile.$name.replace(InlinableString::from(s.as_ref()));
+            self
+        }
+    };
+}
+
+macro_rules! path_option_replace {
+    ($name: ident) => {
+        pub fn $name<S : AsRef<Path>>(&mut self, s : S) -> &mut Self {
+            self.profile.$name.replace(s.as_ref().to_path_buf());
             self
         }
     };
@@ -161,9 +179,9 @@ struct Profile {
     cpu: Vec<usize>,
     disable_mnt: bool,
     deterministic_exit_code: bool,
-    dns: Option<InlinableString>,
+    dns: Vec<InlinableString>,
     hostname: Option<InlinableString>,
-    host_file: Option<PathBuf>,
+    hosts_file: Option<PathBuf>,
     ignore: Vec<InlinableString>,
     interface: Vec<InlinableString>,
     default_net: InterfaceConfig,
@@ -243,6 +261,11 @@ impl FireJailCommand {
     bool_option!(apparmor);
     bool_option!(appimage);
     bool_option!(caps);
+    bool_option!(disable_mnt);
+    bool_option!(deterministic_exit_code);
+    inlinablestring_option_replace!(cgroup);
+    inlinablestring_option_replace!(hostname);
+    path_option_replace!(hosts_file);
     pub fn new<S: AsRef<str>>(program: S) -> Self {
         FireJailCommand {
             inner: Command::new("firejail"),
@@ -262,9 +285,9 @@ impl FireJailCommand {
                 cpu: vec![],
                 disable_mnt: false,
                 deterministic_exit_code: false,
-                dns: None,
+                dns: vec![],
                 hostname: None,
-                host_file: None,
+                hosts_file: None,
                 ignore: vec![],
                 interface: vec![],
                 default_net: InterfaceConfig {
@@ -351,6 +374,16 @@ impl FireJailCommand {
         self
     }
 
+    pub fn cpu(&mut self, no: usize) -> &mut Self {
+        self.profile.cpu.push(no);
+        self
+    }
+
+    pub fn cpus<N: AsPrimitive<usize>, I : IntoIterator<Item = N>>(&mut self, iter: I) -> &mut Self {
+        self.profile.cpu.extend(iter.into_iter().map(|x|x.as_()));
+        self
+    }
+
     pub fn blacklist<P: AsRef<Path>>(&mut self, path: P) -> &mut Self {
         self.profile.blacklists.push(path.as_ref().to_path_buf());
         self
@@ -381,6 +414,30 @@ impl FireJailCommand {
         I: IntoIterator<Item=S>,
         S: AsRef<str> {
         self.arg_vec.extend(args.into_iter().map(|x| InlinableString::from(x.as_ref())));
+        self
+    }
+
+    pub fn dns<S: AsRef<str>>(&mut self, arg: S) -> &mut Self {
+        self.profile.dns.push(InlinableString::from(arg.as_ref()));
+        self
+    }
+
+    pub fn dnss<I, S>(&mut self, args: I) -> &mut Self where
+        I: IntoIterator<Item=S>,
+        S: AsRef<str> {
+        self.profile.dns.extend(args.into_iter().map(|x| InlinableString::from(x.as_ref())));
+        self
+    }
+
+    pub fn ignore<S: AsRef<str>>(&mut self, arg: S) -> &mut Self {
+        self.profile.ignore.push(InlinableString::from(arg.as_ref()));
+        self
+    }
+
+    pub fn ignores<I, S>(&mut self, args: I) -> &mut Self where
+        I: IntoIterator<Item=S>,
+        S: AsRef<str> {
+        self.profile.ignore.extend(args.into_iter().map(|x| InlinableString::from(x.as_ref())));
         self
     }
 
@@ -454,6 +511,12 @@ impl FireJailCommand {
         if self.profile.appimage {
             self.inner.arg("--appimage");
         }
+        if self.profile.deterministic_exit_code {
+            self.inner.arg("--deterministic-exit-code");
+        }
+        if self.profile.disable_mnt {
+            self.inner.arg("--disable-mnt");
+        }
 
         if self.profile.caps {
             match &self.profile.caps_drop {
@@ -473,12 +536,41 @@ impl FireJailCommand {
             }
         }
 
+        if let Some(g) = &self.profile.cgroup {
+            self.inner.arg(format!("--cgroup={}", g));
+        }
+
+        if let Some(h) = &self.profile.hostname {
+            self.inner.arg(format!("--hostname={}", h));
+        }
+
+        if let Some(h) = &self.profile.hosts_file {
+            self.inner.arg(format!("--hosts-file={}", h.display()));
+        }
+
+        if !self.profile.cpu.is_empty() {
+            self.inner
+                .arg(format!("--cpu={}",
+                             self.profile.cpu.iter()
+                                 .map(|x|format!("{}", x))
+                                 .collect::<Vec<_>>().join(",")));
+        }
+
+
         for (a, b) in &self.profile.bind {
             self.inner.arg(format!("--bind={},{}", a.display(), b.display()));
         }
 
+        for server in &self.profile.dns {
+            self.inner.arg(format!("--dns={}", server));
+        }
+
         for a in &self.profile.blacklists {
             self.inner.arg(format!("--blacklist={}", a.display()));
+        }
+
+        for i in &self.profile.ignore {
+            self.inner.arg(format!("--ignore={}", i));
         }
 
         self.inner
@@ -499,17 +591,30 @@ mod test {
     fn test() {
         use super::*;
         let mut out = String::new();
-        FireJailCommand::new("env")
+        let cpus = vec![0, 1];
+
+        let mut jail = FireJailCommand::new("hostname")
             .apparmor()
             .caps()
-            .verbose()
+            .cpus(cpus)
+            .dns("8.8.8.8")
+            .dns("8.8.4.4")
+            .hostname("test")
+            .deterministic_exit_code()
+            .disable_mnt()
+            .hosts_file("/etc/hosts")
             .caps_drop(
                 CapsDrop::builder()
                     .blacklist("chown")
                     .whilelist("fowner")
                     .build())
-            .stderr(Stdio::piped()).env("E", "2").spawn()
-            .unwrap().stderr.unwrap().read_to_string(&mut out).unwrap();
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .env("E", "2")
+            .spawn()
+            .unwrap();
+        jail.stdout.as_mut().unwrap().read_to_string(&mut out).unwrap();
+        jail.stderr.as_mut().unwrap().read_to_string(&mut out).unwrap();
         println!("{}", out);
     }
 }
